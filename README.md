@@ -17,7 +17,7 @@ This repo builds a **hex-based (H3) market potential model** over an area (defau
 2. Upload or edit `data/inputs/competitors.csv` if you have your own competitors.
 3. Run the notebook end-to-end to produce outputs in `data/outputs/` (maps & CSV).
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/your-username/geo-market-insights/blob/main/notebooks/Geo_Market_Insights.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/markhayes0811/geo-market-insights/blob/main/notebooks/Geo_Market_Insights.ipynb)
 
 > **Note:** If you're running the notebook directly from Colab and not from GitHub, just upload this repository (or mount Google Drive) so relative paths work as-is.
 
