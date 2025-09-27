@@ -1,7 +1,6 @@
 from math import radians, sin, cos, asin, sqrt
 import h3
 from shapely.geometry import Point, Polygon
-from shapely.ops import unary_union
 import geopandas as gpd
 import pandas as pd
 
@@ -14,32 +13,40 @@ def haversine_m(lat1, lon1, lat2, lon2):
     a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
     return 2 * EARTH_R * asin(sqrt(a))
 
-def hexes_in_radius(center_lat, center_lon, radius_m, res):
-    center_hex = h3.geo_to_h3(center_lat, center_lon, res)
-    # expand rings until the hex boundary extent exceeds radius; simple approach
-    k = 1
-    hexes = set([center_hex])
-    while True:
-        ring = set(h3.k_ring(center_hex, k))
-        hexes |= ring
-        gdf = h3_to_gdf(list(hexes))
-        # quick check: keep only hexes whose centroid within radius
-        center = Point(center_lon, center_lat)
-        gdf["centroid"] = gdf.geometry.centroid
-        gdf["dist"] = gdf["centroid"].distance(gpd.GeoSeries([center], crs='EPSG:4326').to_crs(3857).iloc[0])  # bogus in degrees; fix properly below
-        # Instead compute geo distance centroid->center
-        gdf["geo_dist_m"] = gdf["centroid"].apply(lambda p: haversine_m(center_lat, center_lon, p.y, p.x))
-        if gdf["geo_dist_m"].max() > radius_m * 1.5 and k > 3:
-            break
-        k += 1
-    # filter by true radius
-    gdf["keep"] = gdf["geometry"].centroid.apply(lambda p: haversine_m(center_lat, center_lon, p.y, p.x) <= radius_m)
-    return gdf[gdf["keep"]].drop(columns=["centroid","dist","geo_dist_m","keep"])
-
 def h3_to_gdf(hexes):
     polys = []
     for h in hexes:
-        boundary = h3.h3_to_geo_boundary(h, geo_json=True)  # list of (lat, lon)
-        poly = Polygon([(lng, lat) for lat, lng in boundary])
+        # h3 v4 returns [(lat, lng), ...]
+        boundary = h3.cell_to_boundary(h)
+        poly = Polygon([(lng, lat) for (lat, lng) in boundary])
         polys.append({"h3": h, "geometry": poly})
     return gpd.GeoDataFrame(polys, crs="EPSG:4326")
+
+def hexes_in_radius(center_lat, center_lon, radius_m, res):
+    """
+    Return GeoDataFrame of H3 hexes (resolution `res`) whose centroids fall
+    within `radius_m` of (center_lat, center_lon). Uses h3 v4 API.
+    """
+    center_cell = h3.latlng_to_cell(center_lat, center_lon, res)
+
+    # Expand outward in H3 "rings" until we've likely covered the radius,
+    # then precisely filter by Haversine distance on centroids.
+    k = 0
+    cells = {center_cell}
+    while True:
+        k += 1
+        cells |= set(h3.grid_disk(center_cell, k))
+        gdf_tmp = h3_to_gdf(list(cells))
+        centroids = gdf_tmp.geometry.centroid
+        if len(centroids) == 0:
+            continue
+        dists = centroids.apply(lambda p: haversine_m(center_lat, center_lon, p.y, p.x))
+        # stop when max centroid distance comfortably exceeds radius
+        if dists.max() >= radius_m * 1.2 or k > 12:
+            break
+
+    gdf = h3_to_gdf(list(cells))
+    gdf["centroid"] = gdf.geometry.centroid
+    gdf["geo_dist_m"] = gdf["centroid"].apply(lambda p: haversine_m(center_lat, center_lon, p.y, p.x))
+    out = gdf[gdf["geo_dist_m"] <= radius_m].drop(columns=["centroid", "geo_dist_m"]).reset_index(drop=True)
+    return out
